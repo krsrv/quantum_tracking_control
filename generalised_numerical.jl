@@ -30,34 +30,59 @@ hsinner(x, y) = tr(x' * y);
 commutator(x, y) = x*y - y*x;
 
 function dissipator(rho)
-	operator = F16[4] + F16[13];
-	gamma = .01
-	return gamma * Hermitian(operator * rho * operator' - 0.5 * (operator' * operator * rho + rho * operator' * operator));
+	function basic_dissipator(operator, gamma)
+		return gamma * Hermitian(operator * rho * operator' - 0.5 * (operator' * operator * rho + rho * operator' * operator));
+	end
+	return basic_dissipator(F16[4], 0.01) + basic_dissipator(+F16[13], 0.03)
+	# I x Z + Z x I
+	# operator = F16[4] + F16[13];
+	# gamma = .01
+	# return gamma * Hermitian(operator * rho * operator' - 0.5 * (operator' * operator * rho + rho * operator' * operator));
 end
 
+# Target property is coherent information
 function target(rho)
 	coeff = matrix_to_coeff(rho);
-	bloch_norm = norm(coeff[2:4]) * 2;
-	entropy_emt = -(1+bloch_norm)/2 * log((1+bloch_norm)/2) - (1-bloch_norm)/2 * log((1-bloch_norm)/2);
-	entropy = reduce(+, [real(lambda) == 0.0 ? 0 : -real(lambda) * NaNMath.log(real(lambda)) for lambda in eigvals(rho)]);
+	bloch_norm = min(1,norm(coeff[2:4]) * 2);
+	entropy_emt = bloch_norm == 1 ? 0 : -(1+bloch_norm)/2 * log((1+bloch_norm)/2) - (1-bloch_norm)/2 * log((1-bloch_norm)/2);
+	lambdas = [max(0.0, l) for l in eigvals(Hermitian(rho))];
+	entropy = reduce(+, [lambda == 0.0 ? 0 : -lambda * log(lambda) for lambda in lambdas]);
 	return entropy - entropy_emt;
 end
 
 function grad(rho)
 	coeff = matrix_to_coeff(rho);
-	vec_norm = norm(coeff[2:4]);
-	# @show rho, eigvals(rho);
-	grad1 = 1/vec_norm * NaNMath.log((1-2*vec_norm)/(1+2*vec_norm)) * reduce(+, [x*y for (x,y) in zip(coeff[2:4], normalised_F16[2:4])]);
-	grad2 = 0 * F16[1];
-	r = Hermitian(rho);
-	evals = eigvals(r);
-	evecs = eigvecs(r);
-	for i in range(1,4)
-		val = evals[i];
-		vc = evecs[:,i];
-		grad2 += -(1 + NaNMath.log(val)) / (vc' * vc) * reduce(+, [(vc' * basis * vc) * basis for basis in normalised_F16[3:16]])
+	# First calculate gradient of S(B)
+	reduced_matrix = Hermitian(reduce(+, [x*y for (x,y) in zip(coeff[1:4], F4[1:4])]))
+	eigvecs_reduced_matrix = eigvecs(reduced_matrix)
+	eigvals_reduced_matrix = eigvals(reduced_matrix)
+	gradient_reduced_matrix = 0im * F16[1]
+	for basis in range(2,4)
+		for ev in range(1,2)
+			if eigvals_reduced_matrix[ev] == 0.0
+				# Derivative is 0
+				continue
+			else
+				derivative_eval = adjoint(eigvecs_reduced_matrix[:,ev]) * F4[basis] * eigvecs_reduced_matrix[:,ev]
+				# Derivative of (- λ log λ)
+				term = -derivative_eval * (1+NaNMath.log(eigvals_reduced_matrix[ev]))
+				gradient_reduced_matrix += term * normalised_F16[basis]
+			end
+		end
 	end
-	return grad2 - grad1;
+	# Now calculate gradient of S(AB)
+	eigvecs_system_matrix = eigvecs(Hermitian(rho))
+	eigvals_system_matrix = eigvals(Hermitian(rho))
+	gradient_system_matrix = 0 * F16[1];
+	for basis in range(2,16)
+		for ev in range(1,4)
+			derivative_eval = adjoint(eigvecs_system_matrix[:,ev]) * normalised_F16[basis] * eigvecs_system_matrix[:,ev]
+			# Derivative of (- λ log λ)
+			term = -derivative_eval * (1+NaNMath.log(eigvals_system_matrix[ev]))
+			gradient_system_matrix += term * normalised_F16[basis]
+		end
+	end
+	return gradient_system_matrix - gradient_reduced_matrix;
 end
 
 function get_hamiltonian(rho)
@@ -67,82 +92,61 @@ function get_hamiltonian(rho)
 end
 
 function get_hamiltonian(rho, dissipation, gradient)
-	alpha = -1.0im * hsinner(gradient, dissipation)/hsinner(commutator(rho, gradient), commutator(rho, gradient));
-	return Matrix(Hermitian(alpha * commutator(rho, gradient)));
+	alpha = -hsinner(gradient, dissipation)/hsinner(commutator(rho, gradient), commutator(rho, gradient));
+	return Matrix(Hermitian(-1.0im * alpha * commutator(rho, gradient)));
 end
 
 function lindblad(rho, p, t)
+	# return -1.0im * commutator(F16[2], rho)
 	if any(isnan, rho)
-		return NaN * F16[1];
+		return Inf * F16[1];
 	end
 	dissipation = dissipator(rho);
 	gradient = grad(rho);
 	hamiltonian = get_hamiltonian(rho, dissipation, gradient);
+	if any(isnan, hamiltonian)
+		return Inf * F16[1]
+	end
 	return (-1.0im * commutator(hamiltonian, rho) + dissipation);
 end
 
-function check_positivity(m::AbstractMatrix)
-    if !ishermitian(m)
-        @warn "Input fails the numerical test for Hermitian matrix. Use the upper triangle to construct a new Hermitian matrix."
-        d = Hermitian(m)
-    else
-        d = m
-    end
-    eigmin(d) >= 0
-end
-
-function PositivityCheck!(ρ, t, integrator)
-    if !check_positivity(integrator.u) || !check_positivity(ρ)
-        @warn "The density matrix becomes negative at time $t."
-        terminate!(integrator)
-    end
-    u_modified!(integrator, false)
-end
-callback = FunctionCallingCallback(PositivityCheck!, func_everystep=true, func_start=false);
-
-function outdomain(r, p, t)
-	return any(isnan, r) || eigmin(Hermitian(r))<0
-end
-
-### Tests begin
+###################
+### Tests begin ###
+###################
 r = 0.5 * [1 0 0 1;0 0 0 0;0 0 0 0;1 0 0 1]; # Maximally entangled state
 @assert target(r) == -log(2);
 @assert matrix_to_coeff(r) == 0.5 * [1,0,0,0,0,1,0,0,0,0,-1,0,0,0,0,1];
 
 r = coeff_to_matrix(zeros(15)); # Maximally mixed state
 @assert target(r) == log(2);
-### Tests end
+###################
+###  Tests end  ###
+###################
 
-# x = rand(4,4) + 1.0im * rand(4,4);
-# rho = x' * x;
-# rho = rho / tr(rho);
+function get_random_density_matrix()
+	x = rand(ComplexF64, (4,4))
+	x = x * adjoint(x)
+	return x/tr(x)
+end
 # Initial rho
-rho = kron([1 0;0 0], [1 0;0 0]);
-# rho = 0.995 * rho + 0.005 * F16[1]/4
+# rho = (1/2+0.0im) * kron([1;0;0;1], [1 0 0 1]);
+# rho = 0.6 * rho + 0.4 * get_random_density_matrix();
+rho = get_random_density_matrix();
 print(rho, "\n");
 print(eigvals(rho), "\n");
 
 tend = 10.0;
-problem = ODEProblem(lindblad, Matrix(Hermitian(rho)), (0.0, tend));
-sol = solve(problem, tstops = 0.0:0.1:tend, isoutofdomain = outdomain);
+problem = ODEProblem(lindblad, rho, (0.0, tend));
+sol = solve(problem, tstops = 0.0:0.1:tend);
 
 if sol.t[end] < tend
 	print("Ended early at ", sol.t[end], "\n")
 end
-times = [t for (u, t) in tuples(sol)];
-targets = [target(u) for (u, t) in tuples(sol)];
 
-plot(times, targets, show=true);
+times = sol.t;
+targets = [target(u) for u in sol.u];
+purity = [tr(Hermitian(u*u)) for u in sol.u];
 
-
-
-
-
-
-
-
-
-
-
-
-
+plotly()
+plot(times, purity, show=true, label="Purity");
+plot(times, targets, show=true, label="Coherent info");
