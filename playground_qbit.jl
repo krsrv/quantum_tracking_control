@@ -17,12 +17,13 @@ coeff_to_matrix(coeff) = 0.5 * reduce(+, [x*y for (x,y) in zip(cat([1],coeff,dim
 commutator(x, y) = x*y - y*x;
 
 function dissipator(v)
-	operator = F4[3];
-	dephasing_gamma = .01 - 0.001
-	dephasing_dissipator = -2 * dephasing_gamma * [v[1], v[2], 0];
-	relaxation_gamma = .03 - 0.003
-	relaxation_dissipator = -relaxation_gamma * [v[1]/2, v[2]/2, v[3]-1];
-	return dephasing_dissipator + relaxation_dissipator;
+	return [0,0,0];
+	# operator = F4[3];
+	# dephasing_gamma = .01 - 0.001
+	# dephasing_dissipator = -2 * dephasing_gamma * [v[1], v[2], 0];
+	# relaxation_gamma = .03 - 0.003
+	# relaxation_dissipator = -relaxation_gamma * [v[1]/2, v[2]/2, v[3]-1];
+	# return dephasing_dissipator + relaxation_dissipator;
 end
 
 function target(v)
@@ -34,11 +35,12 @@ function grad(v)
 end
 
 function get_hamiltonian(v)
-	dephasing_gamma = 0.01;
-	dephasing_hamiltonian = -dephasing_gamma / v[3] * [v[2], -v[1], 0];
-	relaxation_gamma = .03
-	relaxation_hamiltonian = -relaxation_gamma / (4 * v[3]) * [v[2], -v[1], 0];
-	return dephasing_hamiltonian + relaxation_hamiltonian
+	return [v[2]*v[3],v[3]*v[1],v[1]*v[2]];
+	# dephasing_gamma = 0.01;
+	# dephasing_hamiltonian = -dephasing_gamma / v[3] * [v[2], -v[1], 0];
+	# relaxation_gamma = .03
+	# relaxation_hamiltonian = -relaxation_gamma / (4 * v[3]) * [v[2], -v[1], 0];
+	# return dephasing_hamiltonian + relaxation_hamiltonian
 end
 
 function lindblad(v, p, t)
@@ -84,13 +86,17 @@ perp = [norm(u)^2 * norm(grad(u))^2 - (grad(u)' * u)^2 for (u,t) in tuples(sol)]
 normie = [norm(u)^2 for (u,t) in tuples(sol)];
 
 plotly();
-plot(times, [targets model_target], show=true, label=["Target" "Modelled target"]);
+access(i) = [x[i] for x in sol.u];
+plot(times, normie, show=true, label="norm");
 # plot(times, ham, show=true, label="Hamiltonian norm");
 # plot(times, perp, show=true, label="Perpendicular component norm");
 # plot(times, normie, show=true, label="Norm");
-plot(sol, show=true, label=["vx" "vy" "vz"]);
-
-
+path3d(access(1),access(2),access(3), show=true)
+x = y = range(0.1,stop=1,length=20)
+surface!(x,y,(x,y)->0.2*0.2*0.9/x/y,alpha=0.4)
+u = range(0,stop=2*π,length=20);
+w = range(0,stop=π,length=20);
+surface!(norm(v)*cos.(u) * sin.(w)', norm(v)*sin.(u) * sin.(w)', norm(v)*ones(20)*cos.(w)',alpha=0.4)
 # Just hamiltonian - 253.12564570409663
 
 
