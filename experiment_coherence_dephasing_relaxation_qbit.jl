@@ -19,7 +19,7 @@ kb = 1.380649 * 1e-23; # Boltzmann's constant - Joule per Kelvin
 # t_1 - corresponds to thermal relaxation.
 t_1 = 50.5 * 1e-6;
 t_2 = 45.8 * 1e-6;
-dephasing_gamma = 1 / ((1/t_2)-(1/(2*t_1)));
+dephasing_gamma = ((1/t_2)-(1/(2*t_1)));
 thermal_gamma = 1 / t_1;
 
 # Sampling rate is 2.4 giga samples per sec
@@ -93,7 +93,8 @@ end
 
 
 v = [1/sqrt(2),0,1/sqrt(2)]
-tend = 1e-3;
+v = [0.41,0,-0.4]
+tend = v[3]^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-v[3]*(1-v[3])*thermal_gamma));
 problem = ODEProblem(lindblad, v, (0.0, tend));
 
 saved_hamiltonian = SavedValues(eltype(1/sampling_rate), Matrix{ComplexF64});
@@ -105,69 +106,76 @@ callback = CallbackSet(
 
 @time sol = solve(problem, alg_hints=[:stiff], saveat=1/sampling_rate, isoutofdomain=outdomain);
 
-using Plots;
-plotly();
-plot(sol, show=true, label=["vx" "vy" "vz"]);
-plot(sol.t, [target(u) for u in sol.u], show=true, ylim=(0,1), label="target")
-plot(sol.t, [get_hamiltonian(u)[2] for u in sol.u], show=true, label="hamiltonian norm")
+print("Conservative bound: ", v[3]^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-v[3]*(1-v[3])*thermal_gamma)))
+print("\n")
+print(sol.t[end])
 
-using Polynomials, IterTools
+z = sol.u[end][3]
+fz = (v[1]^2+v[2]^2) / z
+print("\nZ: ",z, "\ntarget value: ", v[1]^2+v[2]^2, "\nratio: ", fz, "\nEstimated time: ", z^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-z*(1-z)*thermal_gamma)));
+# using Plots;
+# plotly();
+# plot(sol, show=true, label=["vx" "vy" "vz"]);
+# plot(sol.t, [target(u) for u in sol.u], show=true, ylim=(0,1), label="target")
+# plot(sol.t, [get_hamiltonian(u)[2] for u in sol.u], show=true, label="hamiltonian norm")
 
-t = sol.t;
-hy = [get_hamiltonian(u)[2] for u in sol.u];
-crude_fit = truncate(fit(t, hy, 20), atol=0.01);
-plot(t, (@.f(t)), label="Poly fit", show=true);
-plot!(t, hy, label="Actual");
-@show maximum([abs(hy[x])-crude_fit(t[x]) for x in range(1,length(t))])
+# using Polynomials, IterTools
 
-partitions = 5;
-total_length = length(t);
-partition_length = floor(Int, total_length/partitions);
+# t = sol.t;
+# hy = [get_hamiltonian(u)[2] for u in sol.u];
+# crude_fit = truncate(fit(t, hy, 20), atol=0.01);
+# plot(t, (@.f(t)), label="Poly fit", show=true);
+# plot!(t, hy, label="Actual");
+# @show maximum([abs(hy[x])-crude_fit(t[x]) for x in range(1,length(t))])
 
-crude_fit_parts = [];
-t_parts = [];
-for i in range(1, partitions)
-	start, nd = partition_length*(i-1)+1, partition_length*i
-	push!(t_parts, t[start:nd])
-	push!(crude_fit_parts, truncate(fit(t[start:nd], hy[start:nd], 20), atol=0.01))
-end
+# partitions = 5;
+# total_length = length(t);
+# partition_length = floor(Int, total_length/partitions);
 
-plot(t_parts[1], (@.crude_fit_parts[1](t_parts[1])), color="red", linewidth=2, thickness_scaling=1, label="Fit 1")
-for i in range(2, partitions)
-	plot!(t_parts[i], (@.crude_fit_parts[i](t_parts[i])), color="red", linewidth=2, thickness_scaling=1, label="Fit $i");
-end
-plot!(t, hy, label="Actual", show=true);
-@show maximum([abs(hy[x])-crude_fit_parts[ceil(Int, x/partition_length)](t[x] % partition_length) for x in range(1,length(t)-1)])
+# crude_fit_parts = [];
+# t_parts = [];
+# for i in range(1, partitions)
+# 	start, nd = partition_length*(i-1)+1, partition_length*i
+# 	push!(t_parts, t[start:nd])
+# 	push!(crude_fit_parts, truncate(fit(t[start:nd], hy[start:nd], 20), atol=0.01))
+# end
 
-using DataFrames, CSV;
-hx_coeffs = [0 for x in range(1, partitions*11)];
-hz_coeffs = [0 for x in range(1, partitions*11)];
-hy_coeffs = [];
-for i in range(1, partitions)
-	append!(hy_coeffs, [getindex(crude_fit_parts[i], j) for j in range(0,10)])
-end
-df = DataFrame(permutedims(append!([t_1*1e6,t_2*1e6], hx_coeffs, hy_coeffs, hz_coeffs)), ["t1","t2",
+# plot(t_parts[1], (@.crude_fit_parts[1](t_parts[1])), color="red", linewidth=2, thickness_scaling=1, label="Fit 1")
+# for i in range(2, partitions)
+# 	plot!(t_parts[i], (@.crude_fit_parts[i](t_parts[i])), color="red", linewidth=2, thickness_scaling=1, label="Fit $i");
+# end
+# plot!(t, hy, label="Actual", show=true);
+# @show maximum([abs(hy[x])-crude_fit_parts[ceil(Int, x/partition_length)](t[x] % partition_length) for x in range(1,length(t)-1)])
 
-"hx_1_0","hx_1_1","hx_1_2","hx_1_3","hx_1_4","hx_1_5","hx_1_6","hx_1_7","hx_1_8","hx_1_9","hx_1_10",
-"hx_2_0","hx_2_1","hx_2_2","hx_2_3","hx_2_4","hx_2_5","hx_2_6","hx_2_7","hx_2_8","hx_2_9","hx_2_10",
-"hx_3_0","hx_3_1","hx_3_2","hx_3_3","hx_3_4","hx_3_5","hx_3_6","hx_3_7","hx_3_8","hx_3_9","hx_3_10",
-"hx_4_0","hx_4_1","hx_4_2","hx_4_3","hx_4_4","hx_4_5","hx_4_6","hx_4_7","hx_4_8","hx_4_9","hx_4_10",
-"hx_5_0","hx_5_1","hx_5_2","hx_5_3","hx_5_4","hx_5_5","hx_5_6","hx_5_7","hx_5_8","hx_5_9","hx_5_10",
+# using DataFrames, CSV;
+# hx_coeffs = [0 for x in range(1, partitions*11)];
+# hz_coeffs = [0 for x in range(1, partitions*11)];
+# hy_coeffs = [];
+# for i in range(1, partitions)
+# 	append!(hy_coeffs, [getindex(crude_fit_parts[i], j) for j in range(0,10)])
+# end
+# df = DataFrame(permutedims(append!([t_1*1e6,t_2*1e6], hx_coeffs, hy_coeffs, hz_coeffs)), ["t1","t2",
 
-"hy_1_0","hy_1_1","hy_1_2","hy_1_3","hy_1_4","hy_1_5","hy_1_6","hy_1_7","hy_1_8","hy_1_9","hy_1_10",
-"hy_2_0","hy_2_1","hy_2_2","hy_2_3","hy_2_4","hy_2_5","hy_2_6","hy_2_7","hy_2_8","hy_2_9","hy_2_10",
-"hy_3_0","hy_3_1","hy_3_2","hy_3_3","hy_3_4","hy_3_5","hy_3_6","hy_3_7","hy_3_8","hy_3_9","hy_3_10",
-"hy_4_0","hy_4_1","hy_4_2","hy_4_3","hy_4_4","hy_4_5","hy_4_6","hy_4_7","hy_4_8","hy_4_9","hy_4_10",
-"hy_5_0","hy_5_1","hy_5_2","hy_5_3","hy_5_4","hy_5_5","hy_5_6","hy_5_7","hy_5_8","hy_5_9","hy_5_10",
+# "hx_1_0","hx_1_1","hx_1_2","hx_1_3","hx_1_4","hx_1_5","hx_1_6","hx_1_7","hx_1_8","hx_1_9","hx_1_10",
+# "hx_2_0","hx_2_1","hx_2_2","hx_2_3","hx_2_4","hx_2_5","hx_2_6","hx_2_7","hx_2_8","hx_2_9","hx_2_10",
+# "hx_3_0","hx_3_1","hx_3_2","hx_3_3","hx_3_4","hx_3_5","hx_3_6","hx_3_7","hx_3_8","hx_3_9","hx_3_10",
+# "hx_4_0","hx_4_1","hx_4_2","hx_4_3","hx_4_4","hx_4_5","hx_4_6","hx_4_7","hx_4_8","hx_4_9","hx_4_10",
+# "hx_5_0","hx_5_1","hx_5_2","hx_5_3","hx_5_4","hx_5_5","hx_5_6","hx_5_7","hx_5_8","hx_5_9","hx_5_10",
 
-"hz_1_0","hz_1_1","hz_1_2","hz_1_3","hz_1_4","hz_1_5","hz_1_6","hz_1_7","hz_1_8","hz_1_9","hz_1_10",
-"hz_2_0","hz_2_1","hz_2_2","hz_2_3","hz_2_4","hz_2_5","hz_2_6","hz_2_7","hz_2_8","hz_2_9","hz_2_10",
-"hz_3_0","hz_3_1","hz_3_2","hz_3_3","hz_3_4","hz_3_5","hz_3_6","hz_3_7","hz_3_8","hz_3_9","hz_3_10",
-"hz_4_0","hz_4_1","hz_4_2","hz_4_3","hz_4_4","hz_4_5","hz_4_6","hz_4_7","hz_4_8","hz_4_9","hz_4_10",
-"hz_5_0","hz_5_1","hz_5_2","hz_5_3","hz_5_4","hz_5_5","hz_5_6","hz_5_7","hz_5_8","hz_5_9","hz_5_10",
-])
+# "hy_1_0","hy_1_1","hy_1_2","hy_1_3","hy_1_4","hy_1_5","hy_1_6","hy_1_7","hy_1_8","hy_1_9","hy_1_10",
+# "hy_2_0","hy_2_1","hy_2_2","hy_2_3","hy_2_4","hy_2_5","hy_2_6","hy_2_7","hy_2_8","hy_2_9","hy_2_10",
+# "hy_3_0","hy_3_1","hy_3_2","hy_3_3","hy_3_4","hy_3_5","hy_3_6","hy_3_7","hy_3_8","hy_3_9","hy_3_10",
+# "hy_4_0","hy_4_1","hy_4_2","hy_4_3","hy_4_4","hy_4_5","hy_4_6","hy_4_7","hy_4_8","hy_4_9","hy_4_10",
+# "hy_5_0","hy_5_1","hy_5_2","hy_5_3","hy_5_4","hy_5_5","hy_5_6","hy_5_7","hy_5_8","hy_5_9","hy_5_10",
 
-CSV.write("poly.csv", df)
+# "hz_1_0","hz_1_1","hz_1_2","hz_1_3","hz_1_4","hz_1_5","hz_1_6","hz_1_7","hz_1_8","hz_1_9","hz_1_10",
+# "hz_2_0","hz_2_1","hz_2_2","hz_2_3","hz_2_4","hz_2_5","hz_2_6","hz_2_7","hz_2_8","hz_2_9","hz_2_10",
+# "hz_3_0","hz_3_1","hz_3_2","hz_3_3","hz_3_4","hz_3_5","hz_3_6","hz_3_7","hz_3_8","hz_3_9","hz_3_10",
+# "hz_4_0","hz_4_1","hz_4_2","hz_4_3","hz_4_4","hz_4_5","hz_4_6","hz_4_7","hz_4_8","hz_4_9","hz_4_10",
+# "hz_5_0","hz_5_1","hz_5_2","hz_5_3","hz_5_4","hz_5_5","hz_5_6","hz_5_7","hz_5_8","hz_5_9","hz_5_10",
+# ])
+
+# CSV.write("poly.csv", df)
 
 
 
