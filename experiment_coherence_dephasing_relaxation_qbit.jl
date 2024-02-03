@@ -67,7 +67,8 @@ end
 function get_hamiltonian(v)
 	dephasing_hamiltonian = -dephasing_gamma / v[3] * [v[2], -v[1], 0];
 	thermal_hamiltonian = -thermal_gamma / (4 * v[3]) * [v[2], -v[1], 0];
-	return dephasing_hamiltonian + thermal_hamiltonian + [0,0,100000/2 * 2 * pi]
+	# Add detuning here
+	return dephasing_hamiltonian + thermal_hamiltonian + [0,0,10000/2 * 2 * pi]
 end
 
 function lindblad(v, p, t)
@@ -94,7 +95,7 @@ end
 
 v = [1/sqrt(2),0,1/sqrt(2)]
 v = [0.41,0,-0.4]
-tend = v[3]^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-v[3]*(1-v[3])*thermal_gamma));
+tend = 10^-3;#v[3]^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-v[3]*(1-v[3])*thermal_gamma));
 problem = ODEProblem(lindblad, v, (0.0, tend));
 
 # saved_hamiltonian = SavedValues(eltype(1/sampling_rate), Matrix{ComplexF64});
