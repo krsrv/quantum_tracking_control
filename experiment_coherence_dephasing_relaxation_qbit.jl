@@ -67,7 +67,7 @@ end
 function get_hamiltonian(v)
 	dephasing_hamiltonian = -dephasing_gamma / v[3] * [v[2], -v[1], 0];
 	thermal_hamiltonian = -thermal_gamma / (4 * v[3]) * [v[2], -v[1], 0];
-	return dephasing_hamiltonian + thermal_hamiltonian
+	return dephasing_hamiltonian + thermal_hamiltonian + [0,0,100000/2 * 2 * pi]
 end
 
 function lindblad(v, p, t)
@@ -97,27 +97,27 @@ v = [0.41,0,-0.4]
 tend = v[3]^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-v[3]*(1-v[3])*thermal_gamma));
 problem = ODEProblem(lindblad, v, (0.0, tend));
 
-saved_hamiltonian = SavedValues(eltype(1/sampling_rate), Matrix{ComplexF64});
-saved_target = SavedValues(eltype(1/sampling_rate), Float64);
-callback = CallbackSet(
-	SavingCallback(get_hamiltonian_matrix, saved_hamiltonian, saveat=0:1/sampling_rate:tend),
-	SavingCallback(save_target, saved_target, saveat=0:1/sampling_rate:tend),
-)
+# saved_hamiltonian = SavedValues(eltype(1/sampling_rate), Matrix{ComplexF64});
+# saved_target = SavedValues(eltype(1/sampling_rate), Float64);
+# callback = CallbackSet(
+# 	SavingCallback(get_hamiltonian_matrix, saved_hamiltonian, saveat=0:1/sampling_rate:tend),
+# 	SavingCallback(save_target, saved_target, saveat=0:1/sampling_rate:tend),
+# )
 
-@time sol = solve(problem, alg_hints=[:stiff], saveat=1/sampling_rate, isoutofdomain=outdomain);
+@time sol = solve(problem, alg_hints=[:stiff], saveat=1/sampling_rate);
 
 print("Conservative bound: ", v[3]^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-v[3]*(1-v[3])*thermal_gamma)))
 print("\n")
 print(sol.t[end])
 
-z = sol.u[end][3]
-fz = (v[1]^2+v[2]^2) / z
-print("\nZ: ",z, "\ntarget value: ", v[1]^2+v[2]^2, "\nratio: ", fz, "\nEstimated time: ", z^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-z*(1-z)*thermal_gamma)));
-# using Plots;
-# plotly();
-# plot(sol, show=true, label=["vx" "vy" "vz"]);
-# plot(sol.t, [target(u) for u in sol.u], show=true, ylim=(0,1), label="target")
-# plot(sol.t, [get_hamiltonian(u)[2] for u in sol.u], show=true, label="hamiltonian norm")
+# z = sol.u[end][3]
+# fz = (v[1]^2+v[2]^2) / z
+# print("\nZ: ",z, "\ntarget value: ", v[1]^2+v[2]^2, "\nratio: ", fz, "\nEstimated time: ", z^2/(2*((2*dephasing_gamma + thermal_gamma*0.5)*(v[1]^2+v[2]^2)-z*(1-z)*thermal_gamma)));
+using Plots;
+plotly();
+plot(sol, show=true, label=["vx" "vy" "vz"]);
+plot(sol.t, [target(u) for u in sol.u], show=true, ylim=(0,1), label="target")
+plot(sol.t, [[get_hamiltonian(u)[1] for u in sol.u], [get_hamiltonian(u)[2] for u in sol.u], [get_hamiltonian(u)[3] for u in sol.u]], show=true, label=["hx", "hy", "hz"])
 
 # using Polynomials, IterTools
 
